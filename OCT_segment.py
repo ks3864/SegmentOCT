@@ -6,8 +6,6 @@ import pickle
 from matplotlib import pyplot as plt
 
 def segment_image_info(image_name, image_path, label, images_dict, saved_folder_path, pipeline):
-    # Load the image
-
     sub_image_dict = {}
 
     image = cv2.imread(image_path)
@@ -38,10 +36,6 @@ def segment(removed_text_image, original_image, name, sub_image_dict):
                        'RNFL_Probability_and_VF_Test_points(Field_View)','GCL+_Probability_and_VF_Test_points']
     # Convert the image to grayscale
     gray = cv2.cvtColor(removed_text_image, cv2.COLOR_BGR2GRAY)
-
-
-    if name[0:3] != 'RLS':
-        remove_dots_topright(gray)
 
     # Use Canny edge detection
     edges = cv2.Canny(gray, 30, 80)
@@ -80,6 +74,7 @@ def segment(removed_text_image, original_image, name, sub_image_dict):
             x_t, y_t, w_t, h_t = ordered_contours[2]
             template_image = original_image[y_t:y_t + h_t, x_t:x_t + w_t]
             x, y, w, h = non_RLS_crop(sub_image, template_image, x, y)
+            sub_image = original_image[y:y + h, x:x + w]
 
 
         sub_image_info = {'sub_image': sub_image, 'position': [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]}
@@ -132,32 +127,12 @@ def RLS_red_box_detector(image):
     cropped_image = image[y:y + h, x:x + w]
     return cropped_image, x, y, w, h
 
-def remove_dots_topright(gray):
-
-    height, width = gray.shape
-
-    # Apply a threshold
-    _, binary = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY_INV)
-
-    # Find contours
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    # Draw white squares
-    for cnt in contours:
-        # Get bounding box
-        x, y, w, h = cv2.boundingRect(cnt)
-
-        if x > width * 0.6 and y < height * 0.7:
-            # Draw a white rectangle over the black dot
-            cv2.rectangle(gray, (x - 3, y - 3), (x + w + 3, y + h + 3), (255, 255, 255), -1)
-
 def non_RLS_crop(target_image, template_image, x_original, y_original):
     flipped_template = cv2.flip(template_image, 0)
     x_target, y_target = find_circle(target_image)
     x_template, y_template = find_circle(flipped_template)
-    h, w, _ = template_image.shape()
+    h, w, _ = template_image.shape
     return x_original + x_target - x_template, y_original + y_target - y_template, w, h
-
 
 def find_circle(image):
 
@@ -165,7 +140,7 @@ def find_circle(image):
 
     _, thresholded_image = cv2.threshold(gray_image, 240, 255, cv2.THRESH_BINARY)
 
-    gray_blurred = cv2.blur(thresholded_image, (3, 3))
+    gray_blurred = cv2.blur(thresholded_image, (4, 4))
 
     # Apply Hough transform to detect circles in the image
     circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=300, param2=14, minRadius=100,
@@ -181,7 +156,7 @@ def find_circle(image):
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
 
-    dataset_dir = r'C:\Users\Kuang Sun\Desktop\reports_cleaned'
+    dataset_dir = r'/Users/kuangsun/Desktop/test_reports'
     processed_images_info = {}
     dirs = os.listdir(dataset_dir)
     pipeline = keras_ocr.pipeline.Pipeline()
@@ -190,7 +165,8 @@ if __name__ == '__main__':
     os.makedirs(dir_name, exist_ok=True)
 
     for dir in dirs:
-
+        if(dir[0] == '.'):
+            continue
         current_folder_path = os.path.join(dir_name, dir)
         os.makedirs(current_folder_path, exist_ok=True)
         root_dir = os.path.join(dataset_dir, dir)
