@@ -2,7 +2,6 @@ import os
 import cv2
 import numpy as np
 import keras_ocr
-import easyocr
 import pickle
 from matplotlib import pyplot as plt
 
@@ -78,13 +77,9 @@ def segment(removed_text_image, original_image, name, sub_image_dict):
             y += y2
 
         if index == 4 and name[0:3] != 'RLS':
-            height, width, _ = sub_image.shape
-
-            if height > 740 or width > 980:
-                x, y, w, h = non_RLS_crop(sub_image, x, y)
-                sub_image = original_image[y:y + h, x:x + w]
-
-
+            x_t, y_t, w_t, h_t = ordered_contours[2]
+            template_image = original_image[y_t:y_t + h_t, x_t:x_t + w_t]
+            x, y, w, h = non_RLS_crop(sub_image, template_image, x, y)
 
 
         sub_image_info = {'sub_image': sub_image, 'position': [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]}
@@ -156,53 +151,32 @@ def remove_dots_topright(gray):
             # Draw a white rectangle over the black dot
             cv2.rectangle(gray, (x - 3, y - 3), (x + w + 3, y + h + 3), (255, 255, 255), -1)
 
-def non_RLS_crop(original_image, x_original, y_original):
+def non_RLS_crop(target_image, template_image, x_original, y_original):
+    flipped_template = cv2.flip(template_image, 0)
+    x_target, y_target = find_circle(target_image)
+    x_template, y_template = find_circle(flipped_template)
+    h, w, _ = template_image.shape()
+    return x_original + x_target - x_template, y_original + y_target - y_template, w, h
 
-    image = original_image.copy()
 
-    height, width, _ = image.shape
+def find_circle(image):
 
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # Apply a threshold
-    _, binary = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY_INV)
+    _, thresholded_image = cv2.threshold(gray_image, 240, 255, cv2.THRESH_BINARY)
 
-    # Find contours
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    gray_blurred = cv2.blur(thresholded_image, (3, 3))
 
-    # Draw white squares
-    for cnt in contours:
-        # Get bounding box
-        x, y, w, h = cv2.boundingRect(cnt)
-        cv2.rectangle(image, (x - 2, y - 2), (x + w + 2, y + h + 2), (255, 255, 255), -1)
+    # Apply Hough transform to detect circles in the image
+    circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=300, param2=14, minRadius=100,
+                               maxRadius=130)
 
-    square = 40
-    height, width, _ = image.shape
+    # If circles are detected, draw them
+    if len(circles) > 1:
+        print('Circle detection failed')
+    circles = np.round(circles[0, :]).astype("int")
 
-    while height > 725 and width > 965:
-
-        cv2.rectangle(image, (0, 0), (square, square), (255, 255, 255), -1)
-        cv2.rectangle(image, (width - square, 0), (width, 50), (255, 255, 255), -1)
-        cv2.rectangle(image, (0, height - square), (50, height), (255, 255, 255), -1)
-        cv2.rectangle(image, (width - square, height - square), (width, height), (255, 255, 255), -1)
-
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        # Apply Canny edge detection
-        edges = cv2.Canny(gray, 30, 80)
-        kernel = np.ones((3, 3), np.uint8)
-        dilated = cv2.dilate(edges, kernel, iterations=2)
-        contours, _ = cv2.findContours(dilated, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        # Find the largest contour and its bounding box
-        largest_contour = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest_contour)
-        # Crop the image using the bounding box coordinates
-        x_original += x
-        y_original += y
-        image = image[y:y + h, x:x + w]
-        height, width, _ = image.shape
-
-    return x_original, y_original, width, height
+    return circles[0][0], circles[0][1]
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
@@ -231,8 +205,8 @@ if __name__ == '__main__':
 
         processed_images_info[dir] = current_folder_dict
 
-    with open('oct_reports_info.pickle', 'wb') as handle:
-        pickle.dump(processed_images_info, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    # with open('oct_reports_info.pickle', 'wb') as handle:
+    #     pickle.dump(processed_images_info, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     print('Segmentation done')
 
