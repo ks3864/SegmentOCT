@@ -65,6 +65,8 @@ def segment(removed_text_image, original_image, name, sub_image_dict):
         # Extract the sub-image using slicing
         sub_image = original_image[y:y + h, x:x + w]
 
+
+
         if index == 4 and name[0:3] == 'RLS':
             sub_image, x2, y2, w, h = RLS_red_box_detector(sub_image)
             x += x2
@@ -75,6 +77,27 @@ def segment(removed_text_image, original_image, name, sub_image_dict):
             template_image = original_image[y_t:y_t + h_t, x_t:x_t + w_t]
             x, y, w, h = non_RLS_crop(sub_image, template_image, x, y)
             sub_image = original_image[y:y + h, x:x + w]
+
+        height, width, _ = original_image.shape
+        if width < 2000 and name[0:3] == 'RLS':
+            if index == 2:
+                _, _, w_t, h_t = ordered_contours[0]
+                w = w_t
+                h = h_t
+                sub_image = original_image[y:y + h, x:x + w]
+            if index == 5:
+                #crop GCL+ probability according to red bounding
+                sub_image, x2, y2, w, h = RLS_red_box_detector(sub_image)
+                x += x2
+                y += y2
+
+                #crop GCL+ thickness based on GCL+ probability's w and h
+                x_re, y_re = sub_image_dict[sub_image_names[3]]['position'][0]
+                re_crop_sub_image = original_image[y_re:y_re + h - 3, x_re:x_re + w]
+                sub_image_dict[sub_image_names[3]] = {'sub_image': re_crop_sub_image, 'position': [(x_re, y_re), (x_re + w, y_re), (x_re + w, y_re + h - 3), (x_re, y_re + h - 3)]}
+
+
+
 
 
         sub_image_info = {'sub_image': sub_image, 'position': [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]}
@@ -90,8 +113,8 @@ def text_remover_keras(img_path, pipeline):
     # (word, box) tuples.
     prediction_groups = pipeline.recognize([img])
 
-    # Define the mask for inpainting
-    mask = np.zeros(img.shape[:2], dtype="uint8")
+    height, width, _ = img.shape
+
     for box in prediction_groups[0]:
         x0, y0 = box[1][0]
         x1, y1 = box[1][1]
@@ -102,7 +125,11 @@ def text_remover_keras(img_path, pipeline):
         x1 = int(x1)
         y0 = int(y0)
         y3 = int(y3)
-        img[y0-10:y3+10, x0-10: x1+10] = [255, 255, 255]
+
+        if y0 < 0.6 * height and x0 < 0.6 * width:
+            img[y0 - 30:y3 + 30, x0 - 30: x1 + 30] = [255, 255, 255]
+        else:
+            img[y0 - 10:y3 + 10, x0 - 10: x1 + 10] = [255, 255, 255]
     return img
 
 def RLS_red_box_detector(image):
@@ -161,7 +188,7 @@ if __name__ == '__main__':
     dirs = os.listdir(dataset_dir)
     pipeline = keras_ocr.pipeline.Pipeline()
 
-    dir_name = 'Processed_data'
+    dir_name = 'test_data'
     os.makedirs(dir_name, exist_ok=True)
 
     for dir in dirs:
