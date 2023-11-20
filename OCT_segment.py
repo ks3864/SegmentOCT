@@ -3,9 +3,17 @@ import cv2
 import numpy as np
 import keras_ocr
 import pickle
-from matplotlib import pyplot as plt
 
 def segment_image_info(image_name, image_path, label, images_dict, saved_folder_path, pipeline):
+    """
+    :param image_name: image name with extension
+    :param image_path: image path
+    :param label: G/G_Suspects1/G_Suspects2/S/S_Suspects1
+    :param images_dict: sub-image info to be stored
+    :param saved_folder_path: path to store the sub-images
+    :param pipeline: used for keras OCR
+    :return: None
+    """
     sub_image_dict = {}
 
     image = cv2.imread(image_path)
@@ -31,6 +39,14 @@ def segment_image_info(image_name, image_path, label, images_dict, saved_folder_
     print('Done')
 
 def segment(removed_text_image, original_image, name, sub_image_dict):
+    """
+    Segment the image and return the info of the sub-images
+    :param removed_text_image: text-removed image
+    :param original_image: original image
+    :param name: image name w/o extension
+    :param sub_image_dict: dict that store the sub-images' info
+    :return: None
+    """
     sub_image_names = ['En-face_52.0micrometer_Slab_(Retina_View)', 'Circumpapillary_RNFL',
                        'RNFL_Thickness_(Retina_View)', 'GCL+_Thickness_(Retina_View)',
                        'RNFL_Probability_and_VF_Test_points(Field_View)','GCL+_Probability_and_VF_Test_points']
@@ -48,14 +64,14 @@ def segment(removed_text_image, original_image, name, sub_image_dict):
     filtered_contours = [cnt for cnt in contours if cv2.contourArea(cnt) > 80000]
     ordered_contours = []
 
+    # Get bounding box for each contour
     for contour in filtered_contours:
-        # Get bounding box for each contour
         ordered_contours.append(cv2.boundingRect(contour))
 
     ordered_contours = sorted(ordered_contours, key=lambda box: box[0])
 
     if len(filtered_contours) != 6:
-        print('Segmentation failed')
+        print('Segmentation failed: ' + name)
 
     # Loop through the contours and save the sub-images
     for index, contour in enumerate(ordered_contours):
@@ -65,19 +81,20 @@ def segment(removed_text_image, original_image, name, sub_image_dict):
         # Extract the sub-image using slicing
         sub_image = original_image[y:y + h, x:x + w]
 
-
-
+        #For RLS images, find the top right cornor by detecting its red bounding box
         if index == 4 and name[0:3] == 'RLS':
             sub_image, x2, y2, w, h = RLS_red_box_detector(sub_image)
             x += x2
             y += y2
-
+        # For non-RLS images, find the top right cornor by matching the white circle
+        # with the white circle in RNFL_Thickness_(Retina_View)
         if index == 4 and name[0:3] != 'RLS':
             x_t, y_t, w_t, h_t = ordered_contours[2]
             template_image = original_image[y_t:y_t + h_t, x_t:x_t + w_t]
             x, y, w, h = non_RLS_crop(sub_image, template_image, x, y)
             sub_image = original_image[y:y + h, x:x + w]
 
+        #For RLS images that are down-sampled, recompute the sub-images
         height, width, _ = original_image.shape
         if width < 2000 and name[0:3] == 'RLS':
             if index == 2:
@@ -96,15 +113,17 @@ def segment(removed_text_image, original_image, name, sub_image_dict):
                 re_crop_sub_image = original_image[y_re:y_re + h - 3, x_re:x_re + w]
                 sub_image_dict[sub_image_names[3]] = {'sub_image': re_crop_sub_image, 'position': [(x_re, y_re), (x_re + w, y_re), (x_re + w, y_re + h - 3), (x_re, y_re + h - 3)]}
 
-
-
-
-
+        #store the sub-image info in a dict
         sub_image_info = {'sub_image': sub_image, 'position': [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]}
         sub_image_dict[sub_image_names[index]] = sub_image_info
-#
-#
+
 def text_remover_keras(img_path, pipeline):
+    """
+    Remove text with keras OCR
+    :param img_path:
+    :param pipeline:
+    :return: text-removed image
+    """
     # read the image
     img = keras_ocr.tools.read(img_path)
 
@@ -126,6 +145,7 @@ def text_remover_keras(img_path, pipeline):
         y0 = int(y0)
         y3 = int(y3)
 
+        #replace text with larger area for top right region only
         if y0 < 0.6 * height and x0 < 0.6 * width:
             img[y0 - 30:y3 + 30, x0 - 30: x1 + 30] = [255, 255, 255]
         else:
@@ -133,6 +153,11 @@ def text_remover_keras(img_path, pipeline):
     return img
 
 def RLS_red_box_detector(image):
+    """
+    detect red bounding box for RLS reports
+    :param image:
+    :return: cropped_image, x, y, w, h
+    """
 
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
@@ -155,6 +180,15 @@ def RLS_red_box_detector(image):
     return cropped_image, x, y, w, h
 
 def non_RLS_crop(target_image, template_image, x_original, y_original):
+    """
+    Match the white circle in both RNFL_Probability and RNFL_Thickness as they have
+    the same dimension (flip RNFL_Thickness)
+    :param target_image: RNFL_Probability_and_VF_Test_points(Field_View)
+    :param template_image: RNFL_Thickness_(Retina_View)
+    :param x_original: original x of the target_image in the report
+    :param y_original: original y of the target_image in the report
+    :return: recomputed x, y, w, h
+    """
     flipped_template = cv2.flip(template_image, 0)
     x_target, y_target = find_circle(target_image)
     x_template, y_template = find_circle(flipped_template)
@@ -162,7 +196,13 @@ def non_RLS_crop(target_image, template_image, x_original, y_original):
     return x_original + x_target - x_template, y_original + y_target - y_template, w, h
 
 def find_circle(image):
+    """
+    Find the white circle in the image
+    :param image:
+    :return: position of the circle in the image
+    """
 
+    #convert to grayscale and threshold the image
     gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     _, thresholded_image = cv2.threshold(gray_image, 240, 255, cv2.THRESH_BINARY)
@@ -173,22 +213,24 @@ def find_circle(image):
     circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=300, param2=14, minRadius=100,
                                maxRadius=130)
 
-    # If circles are detected, draw them
     if len(circles) > 1:
         print('Circle detection failed')
     circles = np.round(circles[0, :]).astype("int")
 
+    #return the first circle, which should also be the only coircle detected if worked porperly
     return circles[0][0], circles[0][1]
 
-# Press the green button in the gutter to run the script.
 if __name__ == '__main__':
 
     dataset_dir = r'/Users/kuangsun/Desktop/test_reports'
     processed_images_info = {}
     dirs = os.listdir(dataset_dir)
+
+    #keras OCR pipeline
     pipeline = keras_ocr.pipeline.Pipeline()
 
-    dir_name = 'test_data'
+    #address to save result
+    dir_name = 'Processed_data'
     os.makedirs(dir_name, exist_ok=True)
 
     for dir in dirs:
@@ -208,8 +250,9 @@ if __name__ == '__main__':
 
         processed_images_info[dir] = current_folder_dict
 
-    # with open('oct_reports_info.pickle', 'wb') as handle:
-    #     pickle.dump(processed_images_info, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    #save info dict as a pickle file
+    with open('oct_reports_info.pickle', 'wb') as handle:
+        pickle.dump(processed_images_info, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     print('Segmentation done')
 
